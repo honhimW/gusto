@@ -2,13 +2,12 @@ use crate::input::InputEvent;
 use crate::tui::{Features, Tui};
 use crate::{Component, CtEvent, EventCtx, IEvent, IMsg};
 use anyhow::Result;
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::{select, Receiver, Sender, TryRecvError};
 use log::trace;
 use ratatui::crossterm::event::Event;
 use ratatui::layout::Rect;
 use ratatui::Frame;
 use std::time::Duration;
-use tokio::time::{interval, Interval};
 use crate::helper::KeyHelper;
 
 pub struct App<E, M>
@@ -21,7 +20,7 @@ where
     context: Context<M>,
     component: Root<E, M>,
 
-    interval: Interval,
+    fps: (u8, u8, bool),
 }
 
 pub struct AppBuilder<E, M>
@@ -31,8 +30,8 @@ where
 {
     component: Box<dyn Component<E, M>>,
     features: Features,
-    // limitation & visibleness
-    fps: (u8, bool),
+    // limitation(maximum) & minimal & visibleness
+    fps: (u8, u8, bool),
     message_handler: Box<dyn MsgHandler<E, M>>,
 }
 
@@ -45,7 +44,7 @@ where
         Self {
             component,
             features: Features::default(),
-            fps: (30, false),
+            fps: (30, 1, false),
             message_handler: Box::new(DefaultMsgHandler),
         }
     }
@@ -55,8 +54,8 @@ where
         self
     }
 
-    pub fn fps(mut self, fps: u8, visibility: bool) -> Self {
-        self.fps = (fps, visibility);
+    pub fn fps(mut self, maximum: u8, minimal: u8, visibility: bool) -> Self {
+        self.fps = (maximum, minimal, visibility);
         self
     }
 
@@ -66,7 +65,7 @@ where
     }
 
     pub fn build(self) -> App<E, M> {
-        let interval = interval(delay_duration(self.fps.0 as usize));
+        let interval = crossbeam_channel::tick(delay_duration(self.fps.0 as usize));
         App {
             msg_handler: self.message_handler,
             context: Context {
@@ -74,10 +73,11 @@ where
                 state: AppState::Preparing,
                 msg_channel: crossbeam_channel::unbounded(),
                 pause_reason: None,
-                fps_state: Some(crate::fps::FpsState::default()),
+                fps_state: if self.fps.2 { Some(crate::fps::FpsState::default()) } else { None },
+                interval,
             },
             component: Root { inner: Some(self.component) },
-            interval,
+            fps: self.fps,
         }
     }
 }
@@ -95,9 +95,9 @@ where
         self.context.state == AppState::Running
     }
 
-    pub async fn run(&mut self) -> Result<()> {
+    pub fn run(&mut self) -> Result<()> {
         self.prepare()?;
-        self.looping().await?;
+        self.looping()?;
         self.close()?;
         Ok(())
     }
@@ -111,17 +111,27 @@ where
         Ok(())
     }
 
-    pub async fn looping(&mut self) -> Result<()> {
+    pub fn looping(&mut self) -> Result<()> {
         let _ = self.context.msg_channel.0.send(IMsg::Tick);
+        let minimal_ticker = crossbeam_channel::tick(delay_duration(self.fps.1 as usize));
+        let update_ticker = crossbeam_channel::bounded::<bool>(1);
         while self.health() {
-            self.interval.tick().await;
             let _ = self.handle_input_loop(&self.context.tui.input.receiver());
-            let mut msgs = self.msg_handler.poll(&self.context.msg_channel.1);
-            if !msgs.is_empty() {
-                msgs.retain_mut(|m| !matches!(m, IMsg::Tick));
-                for msg in msgs {
-                    self.msg_handler.handle(&mut self.context, &mut self.component, msg)?;
+            let mut messages = self.msg_handler.poll(&self.context.msg_channel.1);
+            if !messages.is_empty() {
+                messages.retain_mut(|m| !matches!(m, IMsg::Tick));
+                for msg in messages {
+                    let _ = self.msg_handler.handle(&mut self.context, &mut self.component, msg);
                 }
+                let _ = update_ticker.0.send(true);
+            }
+
+            let redraw = select! {
+                recv(minimal_ticker) -> _ => true,
+                recv(update_ticker.1) -> _ => true,
+                default => false,
+            };
+            if redraw {
                 let _ = self.msg_handler.handle(&mut self.context, &mut self.component, IMsg::Tick);
             }
         }
@@ -217,6 +227,7 @@ pub struct Context<M> {
     pub tui: Tui,
     pause_reason: Option<M>,
     fps_state: Option<crate::fps::FpsState>,
+    interval: Receiver<std::time::Instant>,
 }
 
 impl<E, M> Component<E, M> for Root<E, M> {
@@ -242,8 +253,11 @@ impl<E, M> Component<E, M> for Root<E, M> {
 pub trait MsgHandler<E, M> {
     fn poll(&self, rx: &Receiver<IMsg<M>>) -> Vec<IMsg<M>> {
         let mut vec = vec![];
-        if let Ok(msg) = rx.try_recv() {
-            vec.push(msg);
+        for _ in 0..20 {
+            match rx.try_recv() {
+                Ok(msg) => vec.push(msg),
+                Err(_) => break,
+            }
         }
         vec
     }
@@ -264,6 +278,7 @@ where
                 let _ = component.on(&IEvent::Exit, &mut EventCtx::new(ctx.msg_channel.0.clone()));
             }
             IMsg::Tick => {
+                let _ = ctx.interval.recv();
                 if let Some(terminal) = &mut ctx.tui.terminal {
                     let _ = terminal.draw(|f| {
                         if let Some(fps_state) = &mut ctx.fps_state {

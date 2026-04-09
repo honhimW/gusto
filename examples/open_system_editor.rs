@@ -13,13 +13,14 @@ async fn main() -> Result<()> {
     let mut app = AppBuilder::new(Box::new(TestComponent {
         content: "ab".to_string(),
     }))
+        .fps(120, 10, true)
         .features(Features::all())
         .message_handler(Box::new(ExtendMsgHandler {counter: 0}))
         .build();
     app.prepare()?;
 
     while app.health() {
-        app.looping().await?;
+        app.looping()?;
         if app.state() == AppState::Pausing {
             let reason = app.take_pause_reason();
             if let Some(reason) = reason {
