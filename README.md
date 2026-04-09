@@ -5,10 +5,9 @@ lightweight ratatui framework
 ### Quick start
 
 ```rust
-#[tokio::main]
 async fn main() -> Result<()> {
     let mut app = AppBuilder::new(Box::new(TestComponent)).build();
-    app.run().await?;
+    app.run()?;
     Ok(())
 }
 
