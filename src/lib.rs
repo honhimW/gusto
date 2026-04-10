@@ -6,6 +6,7 @@ pub mod fps;
 
 use anyhow::Result;
 use crossbeam_channel::Sender;
+use ratatui::crossterm::event::{KeyEvent, MouseEvent};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
@@ -28,6 +29,33 @@ pub enum IMsg<M> {
     Any(String),
     Custom(M),
     None,
+}
+
+impl<E> IEvent<E> {
+    pub fn as_key(&self) -> Option<KeyEvent> {
+        if let IEvent::CT(ct) = self && let CtEvent::Key(key) = ct {
+            Some(*key)
+        } else {
+            None
+        }
+    }
+    
+    pub fn as_mouse(&self) -> Option<MouseEvent> {
+        if let IEvent::CT(ct) = self && let CtEvent::Mouse(mouse) = ct {
+            Some(*mouse)
+        } else {
+            None
+        }
+    }
+    
+    // columns, rows
+    pub fn as_resize(&self) -> Option<(u16, u16)> {
+        if let IEvent::CT(ct) = self && let CtEvent::Resize(columns, rows) = ct {
+            Some((*columns, *rows))
+        } else {
+            None
+        }
+    }
 }
 
 impl<M> IMsg<M> {

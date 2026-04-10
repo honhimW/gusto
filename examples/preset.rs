@@ -5,8 +5,7 @@ use gusto::app::AppBuilder;
 use gusto::{Component, EventCtx, IEvent, IMsg};
 use gusto::helper::KeyHelper;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let mut app = AppBuilder::new(Box::new(TestComponent)).fps(120, 120, true).build();
     app.run()?;
     Ok(())

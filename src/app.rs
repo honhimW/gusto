@@ -237,7 +237,13 @@ impl<E, M> Component<E, M> for Root<E, M> {
             return Ok(());
         }
         match &mut self.inner {
-            Some(root) => root.on(&event, ctx),
+            Some(root) => {
+                let result = root.on(&event, ctx);
+                if ctx.consumed {
+                    let _ = ctx.sender.send(IMsg::Tick);
+                }
+                result
+            },
             None => Ok(()),
         }
     }

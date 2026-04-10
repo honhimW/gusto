@@ -8,8 +8,7 @@ use gusto::{Component, EventCtx, IEvent, IMsg};
 use gusto::helper::MouseHelper;
 use gusto::tui::Features;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let mut app = AppBuilder::new(Box::new(TestComponent {
         content: "ab".to_string(),
     }))
@@ -50,13 +49,14 @@ impl Component<E, M> for TestComponent {
         if let IEvent::CT(ct) = event && let Some(k) = ct.as_key_press_event() {
             if let KeyCode::Char(c) = k.code && c == 'e' {
                 ctx.sender().send(IMsg::Pause(M(self.content.clone())))?;
+                ctx.consumed();
             }
             if let KeyCode::F(5) = k.code {
-                ctx.sender().send(IMsg::Tick)?;
+                ctx.consumed();
             }
         }
         if let IEvent::CT(ct) = event && let Some(m) = ct.as_mouse_event() && m.is_n_left_down() {
-            ctx.sender().send(IMsg::Tick)?;
+            ctx.consumed();
         }
         if let IEvent::Custom(e) = event {
             self.content = e.0.clone();

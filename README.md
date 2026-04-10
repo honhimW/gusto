@@ -5,10 +5,9 @@ lightweight ratatui framework
 ### Quick start
 
 ```rust
-async fn main() -> Result<()> {
+fn main() {
     let mut app = AppBuilder::new(Box::new(TestComponent)).build();
-    app.run()?;
-    Ok(())
+    app.run();
 }
 
 struct TestComponent;
